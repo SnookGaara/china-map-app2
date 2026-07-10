@@ -3,6 +3,8 @@ import folium
 from streamlit_folium import st_folium
 import pandas as pd
 from geopy.distance import geodesic
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 import json
 
 # ─── Page Config ────────────────────────────────────────────────────────────
@@ -225,10 +227,76 @@ ALL_CITIES_DF = pd.DataFrame([
     for k, v in ALL_CITIES.items()
 ])
 
+# ─── Live Geocoding (fallback for any city not in the local dataset) ──────────
+@st.cache_resource
+def get_geolocator():
+    geolocator = Nominatim(user_agent="china_logistics_streamlit_app")
+    # Nominatim's usage policy asks for max 1 request/sec
+    return RateLimiter(geolocator.geocode, min_delay_seconds=1, swallow_exceptions=True)
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def geocode_search(query):
+    """Look up any place name in China via OpenStreetMap/Nominatim.
+    Returns a list of city-like dicts so cities/towns/districts not in the
+    curated ALL_CITIES dataset (e.g. 'Heze City', 'Zhangjiagang') can still
+    be found and used."""
+    if not query or len(query) < 2:
+        return []
+    geocode = get_geolocator()
+    try:
+        locations = geocode(
+            query,
+            exactly_one=False,
+            addressdetails=True,
+            country_codes="cn",
+            language="en",
+            timeout=8,
+        )
+    except Exception:
+        locations = None
+    if not locations:
+        return []
+
+    results = []
+    seen = set()
+    for loc in locations[:8]:
+        addr = loc.raw.get("address", {}) if hasattr(loc, "raw") else {}
+        # Prefer the most specific place-type name available
+        name = (
+            addr.get("city") or addr.get("town") or addr.get("county")
+            or addr.get("village") or addr.get("municipality")
+            or loc.address.split(",")[0]
+        )
+        province = (
+            addr.get("state") or addr.get("province")
+            or addr.get("region") or "China"
+        )
+        key = (name.lower(), round(loc.latitude, 2), round(loc.longitude, 2))
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({
+            "name": name,
+            "lat": loc.latitude,
+            "lon": loc.longitude,
+            "province": province,
+            "type": "City (search)",
+            "color": "#e3b341",
+            "description": "",
+        })
+    return results
+
+def get_all_cities():
+    """Merged view of the curated dataset plus any cities found via live
+    search this session, so they show up in the distance calculator too."""
+    custom = st.session_state.get("custom_cities", {})
+    return {**ALL_CITIES, **custom}
+
 # ─── Helper Functions ─────────────────────────────────────────────────────────
 def calc_distance(city1, city2):
-    c1 = (ALL_CITIES[city1]["lat"], ALL_CITIES[city1]["lon"])
-    c2 = (ALL_CITIES[city2]["lat"], ALL_CITIES[city2]["lon"])
+    cities = get_all_cities()
+    c1 = (cities[city1]["lat"], cities[city1]["lon"])
+    c2 = (cities[city2]["lat"], cities[city2]["lon"])
     return round(geodesic(c1, c2).km, 1)
 
 def search_cities(query):
@@ -236,9 +304,23 @@ def search_cities(query):
         return []
     q = query.lower()
     results = []
-    for name, data in ALL_CITIES.items():
+    seen_names = set()
+
+    # 1) Local curated dataset (exact/substring match on name or province)
+    for name, data in get_all_cities().items():
         if (q in name.lower() or q in data["province"].lower()):
             results.append({"name": name, **data})
+            seen_names.add(name.lower())
+
+    # 2) Live geocoding fallback — catches cities/towns not in the curated
+    #    list (e.g. "Heze City", "Zhangjiagang") without requiring an exact
+    #    province match.
+    if len(results) < 8:
+        for r in geocode_search(query):
+            if r["name"].lower() not in seen_names:
+                results.append(r)
+                seen_names.add(r["name"].lower())
+
     return results[:8]
 
 def make_popup_html(name, data):
@@ -303,8 +385,9 @@ def build_map(center_lat=33.5, center_lon=114.0, zoom=5,
 
     # Distance line
     if dist_city1 and dist_city2 and dist_city1 != dist_city2:
-        c1 = ALL_CITIES[dist_city1]
-        c2 = ALL_CITIES[dist_city2]
+        cities = get_all_cities()
+        c1 = cities[dist_city1]
+        c2 = cities[dist_city2]
         folium.PolyLine(
             locations=[[c1["lat"], c1["lon"]], [c2["lat"], c2["lon"]]],
             color="#f0883e",
@@ -381,9 +464,10 @@ def build_map(center_lat=33.5, center_lon=114.0, zoom=5,
         ).add_to(m)
 
     # Distance endpoint highlights
+    _non_key_cities = {**ADDITIONAL_CITIES, **st.session_state.get("custom_cities", {})}
     for dc in [dist_city1, dist_city2]:
-        if dc and dc in ADDITIONAL_CITIES:
-            d = ADDITIONAL_CITIES[dc]
+        if dc and dc in _non_key_cities:
+            d = _non_key_cities[dc]
             folium.CircleMarker(
                 location=[d["lat"], d["lon"]],
                 radius=7,
@@ -485,6 +569,8 @@ if "dist_city2" not in st.session_state:
     st.session_state.dist_city2 = None
 if "searched_city" not in st.session_state:
     st.session_state.searched_city = None
+if "custom_cities" not in st.session_state:
+    st.session_state.custom_cities = {}
 
 
 # ─── Layout ────────────────────────────────────────────────────────────────────
@@ -498,12 +584,15 @@ with st.sidebar:
     search_input = st.text_input("", placeholder="City, district, province…", label_visibility="collapsed")
 
     if search_input:
-        results = search_cities(search_input)
+        with st.spinner("Searching…"):
+            results = search_cities(search_input)
         if results:
-            for r in results:
+            for i, r in enumerate(results):
                 is_key = r["name"] in KEY_CITIES
-                label = f"{'🔴 ' if is_key else '⚪ '}{r['name']} · {r['province']}"
-                if st.button(label, key=f"search_{r['name']}"):
+                is_live = r.get("type") == "City (search)"
+                icon = "🔴" if is_key else ("🟡" if is_live else "⚪")
+                label = f"{icon} {r['name']} · {r['province']}"
+                if st.button(label, key=f"search_{i}_{r['name']}"):
                     st.session_state.map_center = [r["lat"], r["lon"]]
                     st.session_state.map_zoom = 9
                     st.session_state.searched_city = {
@@ -512,8 +601,16 @@ with st.sidebar:
                         "lon": r["lon"],
                         "province": r["province"],
                     }
+                    # Persist any city found via live geocoding so it also
+                    # becomes selectable in the Distance Calculator below.
+                    if is_live and r["name"] not in ALL_CITIES:
+                        st.session_state.custom_cities[r["name"]] = {
+                            "lat": r["lat"], "lon": r["lon"],
+                            "province": r["province"], "type": "City",
+                            "color": "#e3b341", "description": "",
+                        }
         else:
-            st.caption("No results found.")
+            st.caption("No results found. Try a different spelling, or the English/Pinyin name.")
 
     if st.session_state.searched_city:
         sc = st.session_state.searched_city
@@ -561,7 +658,29 @@ with st.sidebar:
     st.markdown("---")
     st.markdown('<div class="sidebar-header">Distance Calculator</div>', unsafe_allow_html=True)
 
-    all_city_names = sorted(list(ALL_CITIES.keys()))
+    with st.expander("🔎  Can't find a city? Search here", expanded=False):
+        dist_search_input = st.text_input(
+            "", placeholder="e.g. Heze City, Zhangjiagang…",
+            label_visibility="collapsed", key="dist_search_input",
+        )
+        if dist_search_input:
+            with st.spinner("Searching…"):
+                dist_results = search_cities(dist_search_input)
+            if dist_results:
+                for i, r in enumerate(dist_results):
+                    label = f"➕ {r['name']} · {r['province']}"
+                    if st.button(label, key=f"distsearch_{i}_{r['name']}"):
+                        if r["name"] not in ALL_CITIES:
+                            st.session_state.custom_cities[r["name"]] = {
+                                "lat": r["lat"], "lon": r["lon"],
+                                "province": r["province"], "type": "City",
+                                "color": "#e3b341", "description": "",
+                            }
+                        st.rerun()
+            else:
+                st.caption("No results found. Try the English/Pinyin name.")
+
+    all_city_names = sorted(list(get_all_cities().keys()))
     city_options = ["— Select city —"] + all_city_names
 
     idx1 = city_options.index(st.session_state.dist_city1) if st.session_state.dist_city1 in city_options else 0
@@ -589,8 +708,9 @@ with st.sidebar:
         col_show, col_clear = st.columns([3, 2])
         with col_show:
             if st.button("📍  Show on Map", key="show_dist"):
-                c1 = ALL_CITIES[city1]
-                c2 = ALL_CITIES[city2]
+                cities = get_all_cities()
+                c1 = cities[city1]
+                c2 = cities[city2]
                 st.session_state.map_center = [(c1["lat"] + c2["lat"]) / 2,
                                                (c1["lon"] + c2["lon"]) / 2]
                 st.session_state.map_zoom = 5
