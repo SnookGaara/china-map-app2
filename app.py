@@ -567,6 +567,10 @@ if "dist_city1" not in st.session_state:
     st.session_state.dist_city1 = None
 if "dist_city2" not in st.session_state:
     st.session_state.dist_city2 = None
+if "pinned_dist_city1" not in st.session_state:
+    st.session_state.pinned_dist_city1 = None
+if "pinned_dist_city2" not in st.session_state:
+    st.session_state.pinned_dist_city2 = None
 if "searched_city" not in st.session_state:
     st.session_state.searched_city = None
 if "custom_cities" not in st.session_state:
@@ -714,10 +718,19 @@ with st.sidebar:
                 st.session_state.map_center = [(c1["lat"] + c2["lat"]) / 2,
                                                (c1["lon"] + c2["lon"]) / 2]
                 st.session_state.map_zoom = 5
+                # Pin this pair to the map. Unlike dist_city1/2 (which just
+                # track the live dropdown selection), the pinned pair stays
+                # drawn on the map even if the dropdowns are changed
+                # afterwards — it only changes when Show on Map is clicked
+                # again, or is removed via Clear.
+                st.session_state.pinned_dist_city1 = city1
+                st.session_state.pinned_dist_city2 = city2
         with col_clear:
             if st.button("✕ Clear", key="clear_dist"):
                 st.session_state.dist_city1 = None
                 st.session_state.dist_city2 = None
+                st.session_state.pinned_dist_city1 = None
+                st.session_state.pinned_dist_city2 = None
                 # Also reset the selectbox widgets themselves — Streamlit
                 # keeps their picked value under their own `key` in
                 # session_state, so clearing dist_city1/2 alone doesn't
@@ -730,6 +743,14 @@ with st.sidebar:
         st.caption("Select two different cities.")
     else:
         st.caption("Select two cities to calculate distance.")
+
+    if st.session_state.pinned_dist_city1 and st.session_state.pinned_dist_city2:
+        pc1, pc2 = st.session_state.pinned_dist_city1, st.session_state.pinned_dist_city2
+        st.markdown(f"""
+        <div style='margin-top:6px;font-size:11px;color:#3fb950;font-family:monospace;'>
+          📌 Pinned on map: {pc1} → {pc2}
+        </div>
+        """, unsafe_allow_html=True)
 
     # ── Layer Toggle ──────────────────────────────────────────────
     st.markdown("---")
@@ -748,8 +769,13 @@ with col_coords:
     </div>""", unsafe_allow_html=True)
 
 # Build and display map
-active_d1 = st.session_state.dist_city1 if (st.session_state.dist_city1 and st.session_state.dist_city2 and st.session_state.dist_city1 != st.session_state.dist_city2) else None
-active_d2 = st.session_state.dist_city2 if (st.session_state.dist_city1 and st.session_state.dist_city2 and st.session_state.dist_city1 != st.session_state.dist_city2) else None
+_pinned1 = st.session_state.pinned_dist_city1
+_pinned2 = st.session_state.pinned_dist_city2
+_cities_now = get_all_cities()
+active_d1 = _pinned1 if (_pinned1 and _pinned2 and _pinned1 != _pinned2
+                          and _pinned1 in _cities_now and _pinned2 in _cities_now) else None
+active_d2 = _pinned2 if (_pinned1 and _pinned2 and _pinned1 != _pinned2
+                          and _pinned1 in _cities_now and _pinned2 in _cities_now) else None
 
 # Map key changes only when markers/content change — NOT on every zoom/pan
 # This prevents Streamlit from destroying and recreating the map widget on navigation
