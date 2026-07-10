@@ -718,6 +718,12 @@ with st.sidebar:
             if st.button("✕ Clear", key="clear_dist"):
                 st.session_state.dist_city1 = None
                 st.session_state.dist_city2 = None
+                # Also reset the selectbox widgets themselves — Streamlit
+                # keeps their picked value under their own `key` in
+                # session_state, so clearing dist_city1/2 alone doesn't
+                # move the dropdowns back to "— Select city —".
+                st.session_state.city1_sel = "— Select city —"
+                st.session_state.city2_sel = "— Select city —"
                 st.rerun()
 
     elif city1 and city2 and city1 == city2:
