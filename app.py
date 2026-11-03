@@ -361,12 +361,21 @@ def build_map(center_lat=33.5, center_lon=114.0, zoom=5,
         prefer_canvas=True,
     )
 
-    # Light tile layer
+    # Light gray base (no labels)
     folium.TileLayer(
-        tiles="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
         name="Light",
-        max_zoom=19,
+        max_zoom=16,
+    ).add_to(m)
+
+    # English labels overlay (cities, borders, roads)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+        attr="Labels &copy; Esri",
+        name="Labels",
+        overlay=True,
+        max_zoom=16,
     ).add_to(m)
 
     # Additional cities (secondary)
