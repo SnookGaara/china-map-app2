@@ -594,34 +594,39 @@ with st.sidebar:
     st.markdown('<div class="sidebar-header">Search</div>', unsafe_allow_html=True)
     search_input = st.text_input("", placeholder="City, district, province…", label_visibility="collapsed")
 
-    if search_input:
-        with st.spinner("Searching…"):
-            results = search_cities(search_input)
-        if results:
-            for i, r in enumerate(results):
-                is_key = r["name"] in KEY_CITIES
-                is_live = r.get("type") == "City (search)"
-                icon = "🔴" if is_key else ("🟡" if is_live else "⚪")
-                label = f"{icon} {r['name']} · {r['province']}"
-                if st.button(label, key=f"search_{i}_{r['name']}"):
-                    st.session_state.map_center = [r["lat"], r["lon"]]
-                    st.session_state.map_zoom = 9
-                    st.session_state.searched_city = {
-                        "name": r["name"],
-                        "lat": r["lat"],
-                        "lon": r["lon"],
-                        "province": r["province"],
-                    }
-                    # Persist any city found via live geocoding so it also
-                    # becomes selectable in the Distance Calculator below.
-                    if is_live and r["name"] not in ALL_CITIES:
-                        st.session_state.custom_cities[r["name"]] = {
-                            "lat": r["lat"], "lon": r["lon"],
-                            "province": r["province"], "type": "City",
-                            "color": "#e3b341", "description": "",
-                        }
+     if search_input:
+        online = st.session_state.get("online_query") == search_input
+        if online:
+            with st.spinner("Searching online…"):
+                results = search_cities(search_input, online=True)
         else:
-            st.caption("No results found. Try a different spelling, or the English/Pinyin name.")
+            results = search_cities(search_input)
+
+        for i, r in enumerate(results):
+            is_key = r["name"] in KEY_CITIES
+            is_live = r.get("type") == "City (search)"
+            icon = "🔴" if is_key else ("🟡" if is_live else "⚪")
+            label = f"{icon} {r['name']} · {r['province']}"
+            if st.button(label, key=f"search_{i}_{r['name']}"):
+                st.session_state.map_center = [r["lat"], r["lon"]]
+                st.session_state.map_zoom = 9
+                st.session_state.searched_city = {
+                    "name": r["name"], "lat": r["lat"],
+                    "lon": r["lon"], "province": r["province"],
+                }
+                if is_live and r["name"] not in ALL_CITIES:
+                    st.session_state.custom_cities[r["name"]] = {
+                        "lat": r["lat"], "lon": r["lon"],
+                        "province": r["province"], "type": "City",
+                        "color": "#e3b341", "description": "",
+                    }
+
+        if not results:
+            st.caption("No match in local list.")
+        if not online:
+            if st.button("🌐  Search online", key="search_online_btn"):
+                st.session_state.online_query = search_input
+                st.rerun()
 
     if st.session_state.searched_city:
         sc = st.session_state.searched_city
