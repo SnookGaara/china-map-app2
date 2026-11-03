@@ -594,7 +594,7 @@ with st.sidebar:
     st.markdown('<div class="sidebar-header">Search</div>', unsafe_allow_html=True)
     search_input = st.text_input("", placeholder="City, district, province…", label_visibility="collapsed")
 
-     if search_input:
+    if search_input:
         online = st.session_state.get("online_query") == search_input
         if online:
             with st.spinner("Searching online…"):
