@@ -681,7 +681,7 @@ with st.sidebar:
         )
         if dist_search_input:
             with st.spinner("Searching…"):
-                dist_results = search_cities(dist_search_input)
+                dist_results = search_cities(dist_search_input, online=True)
             if dist_results:
                 for i, r in enumerate(dist_results):
                     label = f"➕ {r['name']} · {r['province']}"
