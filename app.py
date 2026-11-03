@@ -363,11 +363,11 @@ def build_map(center_lat=33.5, center_lon=114.0, zoom=5,
 
     # Light tile layer
     folium.TileLayer(
-        tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-        name="Light",
-        max_zoom=19,
-    ).add_to(m)
+      tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+      attr="Tiles &copy; Esri",
+      name="Light",
+      max_zoom=16,
+  ).add_to(m)
 
     # Additional cities (secondary)
     if show_additional:
