@@ -299,23 +299,21 @@ def calc_distance(city1, city2):
     c2 = (cities[city2]["lat"], cities[city2]["lon"])
     return round(geodesic(c1, c2).km, 1)
 
-def search_cities(query):
+def search_cities(query, online=False):
     if not query or len(query) < 2:
         return []
     q = query.lower()
     results = []
     seen_names = set()
 
-    # 1) Local curated dataset (exact/substring match on name or province)
+    # Local curated dataset: instant
     for name, data in get_all_cities().items():
-        if (q in name.lower() or q in data["province"].lower()):
+        if q in name.lower() or q in data["province"].lower():
             results.append({"name": name, **data})
             seen_names.add(name.lower())
 
-    # 2) Live geocoding fallback — catches cities/towns not in the curated
-    #    list (e.g. "Heze City", "Zhangjiagang") without requiring an exact
-    #    province match.
-    if len(results) < 8:
+    # Live geocoding: only when explicitly requested
+    if online:
         for r in geocode_search(query):
             if r["name"].lower() not in seen_names:
                 results.append(r)
